@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 
+import argparse
 from datetime import datetime
 from json import loads
 
@@ -9,8 +10,7 @@ from ebooklib import epub
 import requests
 
 
-def get_todays_news():
-    api_key = ''
+def get_todays_news(api_key):
     payload = {'api-key': api_key,
                'section': 'world',
                'from-date': '2015-03-22'}
@@ -55,7 +55,11 @@ def make_ebook(title, chapters):
     epub.write_epub(filename, book, {})
 
 def main():
-    uris = get_todays_news()
+    parser = argparse.ArgumentParser("Transform news from The Guardian's website into an epub file.")
+    parser.add_argument('api_key', type=str)
+    args = parser.parse_args()
+
+    uris = get_todays_news(args.api_key)
     chapters = []
     for title, raw_content in uris:
         processed_content = scrape(raw_content)
