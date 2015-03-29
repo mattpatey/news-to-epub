@@ -10,10 +10,12 @@ from ebooklib import epub
 import requests
 
 
-def get_todays_news(api_key):
+def get_todays_news(section, api_key):
+    now = datetime.now()
+    api_date = now.strftime('%Y-%m-%d')
     payload = {'api-key': api_key,
-               'section': 'world',
-               'from-date': '2015-03-22'}
+               'section': section,
+               'from-date': api_date}
     r = requests.get('http://content.guardianapis.com/search', params=payload)
     json = loads(r.text)
     articles = [(x['webTitle'], x['webUrl']) for x in json['response']['results']]
@@ -59,7 +61,7 @@ def main():
     parser.add_argument('api_key', type=str)
     args = parser.parse_args()
 
-    uris = get_todays_news(args.api_key)
+    uris = get_todays_news('world', args.api_key)
     chapters = []
     for title, raw_content in uris:
         processed_content = scrape(raw_content)
