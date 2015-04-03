@@ -10,15 +10,26 @@ from ebooklib import epub
 import requests
 
 
-def get_todays_news(section, api_key):
-    now = datetime.now()
-    api_date = now.strftime('%Y-%m-%d')
+def filter_responses(responses):
+    for r in responses:
+        id = r['id'].split('/')
+        if not id[1] == 'live':
+            yield r
+
+def get_news(section, api_key, date=None):
+    if date:
+        d = datetime.strptime(date, '%Y-%m-%d')
+    else:
+        d = datetime.now()
+
     payload = {'api-key': api_key,
                'section': section,
-               'from-date': api_date}
+               'from-date': d.strftime('%Y-%m-%d')}
     r = requests.get('http://content.guardianapis.com/search', params=payload)
     json = loads(r.text)
-    articles = [(x['webTitle'], x['webUrl']) for x in json['response']['results']]
+    filtered = filter_responses(json['response']['results'])
+    sorted_responses = sorted(filtered, key=lambda k: k['webPublicationDate'])
+    articles = [(response['webTitle'], response['webPublicationDate'], response['webUrl']) for response in sorted_responses]
     return articles
 
 def scrape(uri):
@@ -29,11 +40,11 @@ def scrape(uri):
     processed_content = u''.join([unicode(x) for x in filtered_content])
     return processed_content
 
-def make_chapter(title, content):
+def make_article(title, date, content):
     safe_title = u''.join([x for x in title if x.isalpha() or x.isspace()]).replace(u' ', u'-')
     file_name = u'chapter-{}.xhtml'.format(safe_title)
     chapter = epub.EpubHtml(title=title, file_name=file_name, lang='en')
-    chapter.content = u'<h1>{}</h1>{}'.format(title, content)
+    chapter.content = u'<h1>{}</h1><h6>{}</h6>{}'.format(title, date, content)
     return chapter
 
 def make_ebook(title, chapters):
@@ -59,14 +70,15 @@ def make_ebook(title, chapters):
 def main():
     parser = argparse.ArgumentParser("Transform news from The Guardian's website into an epub file.")
     parser.add_argument('api_key', type=str)
+    parser.add_argument('--news-since', type=str, help='Fetch news since a specified date (YYYY-MM-DD)')
     args = parser.parse_args()
-
-    uris = get_todays_news('world', args.api_key)
+    uris = get_news('world', args.api_key, date=args.news_since)
     chapters = []
-    for title, raw_content in uris:
+    for title, published_date, raw_content in uris:
         processed_content = scrape(raw_content)
-        chapter = make_chapter(title, processed_content)
-        chapters.append(chapter)
+        date = datetime.strptime(published_date, "%Y-%m-%dT%H:%M:%SZ")
+        article = make_article(title, date, processed_content)
+        chapters.append(article)
     date = datetime.now().strftime(u'%A %d %B %Y')
     book_title = u'News for {}'.format(date)
     make_ebook(book_title, chapters)
