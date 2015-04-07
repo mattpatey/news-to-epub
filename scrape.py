@@ -3,6 +3,7 @@
 
 import argparse
 from datetime import datetime
+from itertools import chain
 from json import loads
 
 from bs4 import BeautifulSoup
@@ -10,11 +11,31 @@ from ebooklib import epub
 import requests
 
 
-def filter_responses(responses):
-    for r in responses:
-        id = r['id'].split('/')
-        if not id[1] == 'live':
-            yield r
+def make_request(api_key, args=None):
+    payload = { 'api-key': api_key }
+    if args:
+        payload.update(args)
+    res = requests.get('http://content.guardianapis.com/search', params=payload)
+
+    return loads(res.text)['response']
+
+def is_live_article(article):
+    id = article['id'].split('/')
+    if id[1] == 'live':
+        return True
+
+def articles_from_response(res):
+    collated_articles = []
+    for article in res['results']:
+        if is_live_article(article):
+            continue
+
+        article = dict(title=article['webTitle'],
+                       publication_date=article['webPublicationDate'],
+                       url=article['webUrl'],)
+        collated_articles.append(article)
+
+    return collated_articles
 
 def get_news(section, api_key, date=None):
     if date:
@@ -22,15 +43,20 @@ def get_news(section, api_key, date=None):
     else:
         d = datetime.now()
 
-    payload = {'api-key': api_key,
-               'section': section,
-               'from-date': d.strftime('%Y-%m-%d')}
-    r = requests.get('http://content.guardianapis.com/search', params=payload)
-    json = loads(r.text)
-    filtered = filter_responses(json['response']['results'])
-    sorted_responses = sorted(filtered, key=lambda k: k['webPublicationDate'])
-    articles = [(response['webTitle'], response['webPublicationDate'], response['webUrl']) for response in sorted_responses]
-    return articles
+    args = {'section': section,
+            'from-date': d.strftime('%Y-%m-%d')}
+    response = make_request(api_key, args)
+
+    all_articles = []
+    for page in xrange(1, response['pages']):
+        args.update(page=page)
+        response = make_request(api_key, args)
+        articles = articles_from_response(response)
+        all_articles.append(articles)
+
+    all_articles = [i for i in chain(*all_articles)]
+
+    return sorted(all_articles, key=lambda k: k['publication_date'])
 
 def scrape(uri):
     response = requests.get(uri)
@@ -72,13 +98,13 @@ def main():
     parser.add_argument('api_key', type=str)
     parser.add_argument('--news-since', type=str, help='Fetch news since a specified date (YYYY-MM-DD)')
     args = parser.parse_args()
-    uris = get_news('world', args.api_key, date=args.news_since)
+    articles = get_news('world', args.api_key, date=args.news_since)
     chapters = []
-    for title, published_date, raw_content in uris:
-        processed_content = scrape(raw_content)
-        date = datetime.strptime(published_date, "%Y-%m-%dT%H:%M:%SZ")
-        article = make_article(title, date, processed_content)
-        chapters.append(article)
+    for article in articles:
+        date = datetime.strptime(article['publication_date'], "%Y-%m-%dT%H:%M:%SZ")
+        content = scrape(article['url'])
+        a = make_article(article['title'], date, content)
+        chapters.append(a)
     date = datetime.now().strftime(u'%A %d %B %Y')
     book_title = u'News for {}'.format(date)
     make_ebook(book_title, chapters)
