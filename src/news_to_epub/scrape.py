@@ -47,19 +47,18 @@ def main():
     parser.add_argument('--output-path', type=str, default='~', help='Path to where the .epub file will be written, e. g. ~/Desktop')
     args = parser.parse_args()
 
-    if args.from_date:
-        from_date = datetime.strptime(args.from_date, '%Y-%m-%d')
-    else:
-        from_date = datetime.now()
-
     config_filepath = os.path.expanduser('~/news_to_epub.cfg')
-
     try:
         config = read_config(config_filepath)
     except IOError:
         msg = "Couldn't find configuration file {}".format(config_filepath)
         print(msg)
         sys.exit(1)
+
+    if args.from_date:
+        from_date = datetime.strptime(args.from_date, '%Y-%m-%d')
+    else:
+        from_date = datetime.now()
 
     from www_guardian_com import get_content
 
@@ -72,7 +71,6 @@ def main():
     date = datetime.now().strftime(u'%A %d %B %Y')
     title = u'News for {}'.format(date)
     book = make_ebook(title, articles)
-
     safe_filename = u''.join([x for x in title if x.isalpha() or x.isspace() or x.isdigit()]).replace(u' ', u'-')
     filename = u'{}.epub'.format(safe_filename.lower())
     path = os.path.expanduser(args.output_path)
