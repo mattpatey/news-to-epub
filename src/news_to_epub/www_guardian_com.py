@@ -3,6 +3,7 @@
 from datetime import datetime
 from itertools import chain
 from json import loads
+import logging
 import os 
 
 from bs4 import BeautifulSoup
@@ -21,15 +22,6 @@ def scrape(uri):
     filtered_content = content.find_all('p')
     processed_content = u''.join([unicode(x) for x in filtered_content])
     return processed_content
-
-def scrape_articles(articles):
-    chapters = []
-    for article in sorted(articles, key=lambda k: k['publication_date']):
-        date = datetime.strptime(article['publication_date'], "%Y-%m-%dT%H:%M:%SZ")
-        content = scrape(article['url'])
-        article = dict(title=article['title'], date=date, content=content)
-        chapters.append(article)
-    return chapters
 
 def articles_from_response(res):
     collated_articles = []
@@ -55,7 +47,8 @@ def get_content(from_date, config):
     except requests.exceptions.HTTPError, e:
         error_msg = loads(e.response.text)['response']['message']
         msg = '{}: {}'.format(error_msg, e.request.url)
-        raise Exception(msg)
+        print(msg)
+        raise
 
     all_articles = []
     for page in xrange(1, response['pages'] + 1):
@@ -64,4 +57,12 @@ def get_content(from_date, config):
         all_articles.append(articles)
 
     all_articles = [i for i in chain(*all_articles)]
-    return scrape_articles(all_articles)
+
+    chapters = []
+    for article in sorted(articles, key=lambda k: k['publication_date']):
+        date = datetime.strptime(article['publication_date'], "%Y-%m-%dT%H:%M:%SZ")
+        content = scrape(article['url'])
+        article = dict(title=article['title'], date=date, content=content)
+        chapters.append(article)
+
+    return chapters

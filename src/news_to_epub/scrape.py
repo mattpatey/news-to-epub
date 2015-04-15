@@ -4,10 +4,18 @@
 from __future__ import print_function
 
 import argparse
+from collections import defaultdict
 from ConfigParser import SafeConfigParser
 from datetime import datetime
+import hashlib
 from json import loads
 import os
+from cPickle import (
+    dump as pdump, 
+    loads as ploads,
+    Pickler,
+    Unpickler,
+)
 import sys
 
 from ebooklib import epub
@@ -22,6 +30,7 @@ def render_chapter(title, contents, publication_date):
     return chapter
 
 def make_ebook(title, articles):
+    assert len(articles) > 0
     chapters = [render_chapter(c['title'], c['content'], c['date']) for c in articles]
 
     book = epub.EpubBook()
@@ -60,22 +69,70 @@ def main():
     else:
         from_date = datetime.now()
 
-    from www_guardian_com import get_content
+    articles = defaultdict(list)
+    published_pkl = os.path.expanduser('~/news_to_epub.pkl')
 
     try:
-        articles = get_content(from_date, config.items('www_guardian_com'))
+        published_articles = get_published_articles(published_pkl)
+    except IOError:
+        published_articles = []
+
+    from www_guardian_com import get_content
+    try:
+        for article in get_content(from_date, config.items('www_guardian_com')):
+            if get_article_hash(u'www_guardian_com', article) not in published_articles:
+                articles[u'www_guardian_com'].append(article)
+            else:
+                msg = u'Skipping already published article "{}".'.format(article['title'])
+                print(msg)
     except Exception, e:
         print(e)
         sys.exit(1)
 
+    if len(articles['www_guardian_com']) == 0:
+        print('No articles to publish. Exiting.')
+        sys.exit(0)
+
     date = datetime.now().strftime(u'%A %d %B %Y')
     title = u'News for {}'.format(date)
-    book = make_ebook(title, articles)
+    book = make_ebook(title, articles['www_guardian_com'])
     safe_filename = u''.join([x for x in title if x.isalpha() or x.isspace() or x.isdigit()]).replace(u' ', u'-')
     filename = u'{}.epub'.format(safe_filename.lower())
     path = os.path.expanduser(args.output_path)
     filepath = os.path.join(path, filename)
     epub.write_epub(filepath, book, {})
+
+    pickle_published_articles(articles, published_pkl)
+
+def pickle_published_articles(articles, pickle_file):
+    new_hashes = []
+    for source, source_articles in articles.items():
+        for article in source_articles:
+            article_hash = get_article_hash(source, article)
+            new_hashes.append(article_hash)
+
+    try:
+        published_articles = get_published_articles(pickle_file)
+    except IOError:
+        published_articles = []
+
+    merged_hashes = published_articles.append(new_hashes)
+
+    with open(pickle_file, 'wb') as pf:
+        pickler = Pickler(pf)
+        pickler.dump(merged_hashes)
+
+def get_article_hash(source, article):
+    article_key = u'{}_{}_{}'.format(source, unicode(article['date'].isoformat()), article['title'])
+    article_hash = hashlib.md5(article_key.encode('utf-8'))
+    return article_hash.hexdigest()
+
+def get_published_articles(pickle_file):
+    with open(pickle_file, 'rb') as pf:
+        upickler = Unpickler(pf)
+        published_hashes = upickler.load()
+
+    return published_hashes
 
 def read_config(filepath):
     config = SafeConfigParser()
