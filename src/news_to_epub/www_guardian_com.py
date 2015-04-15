@@ -10,6 +10,9 @@ from bs4 import BeautifulSoup
 import requests
 
 
+logger = logging.getLogger(__file__)
+
+
 def is_live_article(article):
     id = article['id'].split('/')
     if id[1] == 'live':
@@ -25,7 +28,8 @@ def scrape(uri):
 
 def articles_from_response(res):
     collated_articles = []
-    for article in res['results']:
+    num_results = len(res['results'])
+    for n, article in enumerate(res['results'], start=1):
         if is_live_article(article):
             continue
         article = dict(title=article['webTitle'],
@@ -47,7 +51,7 @@ def get_content(from_date, config):
     except requests.exceptions.HTTPError, e:
         error_msg = loads(e.response.text)['response']['message']
         msg = '{}: {}'.format(error_msg, e.request.url)
-        print(msg)
+        logger.error(msg)
         raise
 
     all_articles = []
@@ -55,11 +59,11 @@ def get_content(from_date, config):
         response = call_api(dict(api_args, page=page))
         articles = articles_from_response(response)
         all_articles.append(articles)
-
+        
     all_articles = [i for i in chain(*all_articles)]
 
     chapters = []
-    for article in sorted(articles, key=lambda k: k['publication_date']):
+    for article in sorted(all_articles, key=lambda k: k['publication_date']):
         date = datetime.strptime(article['publication_date'], "%Y-%m-%dT%H:%M:%SZ")
         content = scrape(article['url'])
         article = dict(title=article['title'], date=date, content=content)

@@ -6,20 +6,24 @@ from __future__ import print_function
 import argparse
 from collections import defaultdict
 from ConfigParser import SafeConfigParser
-from datetime import datetime
-import hashlib
-from json import loads
-import os
 from cPickle import (
     dump as pdump, 
     loads as ploads,
     Pickler,
     Unpickler,
 )
+from datetime import datetime
+import hashlib
+from json import loads
+import logging
+import os
 import sys
 
 from ebooklib import epub
 import requests
+
+
+logger = logging.getLogger()
 
 
 def render_chapter(title, contents, publication_date):
@@ -37,8 +41,8 @@ def make_ebook(title, articles):
     book.set_title(title)
     book.set_language('en')
 
-    date = datetime.now().strftime(u'%A %d %B %Y')
-    section_name = u'Headlines for {}'.format(date)
+    date = datetime.now().strftime('%A %d %B %Y')
+    section_name = u'Headlines for {}'.format(date) 
     book.toc = ((epub.Link(c.file_name, c.title, c.title) for c in chapters),
                 (epub.Section(section_name), chapters))
 
@@ -53,46 +57,71 @@ def make_ebook(title, articles):
 def main():
     parser = argparse.ArgumentParser("Transform news from The Guardian's website into an epub file.")
     parser.add_argument('--from', dest='from_date', type=str, help='Fetch news since a specified date (YYYY-MM-DD)')
+    parser.add_argument('--loglevel', type=str, default='warn', help='Log level. Valid values include: debug, error, warn, info. Default: warn.')
     parser.add_argument('--output-path', type=str, default='~', help='Path to where the .epub file will be written, e. g. ~/Desktop')
     args = parser.parse_args()
-
-    config_filepath = os.path.expanduser('~/news_to_epub.cfg')
-    try:
-        config = read_config(config_filepath)
-    except IOError:
-        msg = "Couldn't find configuration file {}".format(config_filepath)
-        print(msg)
-        sys.exit(1)
 
     if args.from_date:
         from_date = datetime.strptime(args.from_date, '%Y-%m-%d')
     else:
         from_date = datetime.now()
 
+    if args.loglevel == 'debug':
+        level = logging.DEBUG    
+    elif args.loglevel == 'error':
+        level = logging.ERROR
+    elif args.loglevel == 'warn':
+        level = logging.WARN
+    elif args.loglevel == 'info':
+        level = logging.INFO
+    else:
+        print(u"Invalid log level '{}'. Using default value.".format(args.loglevel))
+        level = logging.WARN
+
+    logger.setLevel(level)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    ch = logging.StreamHandler()
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)
+
+    config_filepath = os.path.expanduser('~/news_to_epub.cfg')
+    try:
+        config = SafeConfigParser()
+        with open(config_filepath, 'r') as c:
+            config.readfp(c)
+    except IOError:
+        msg = "Couldn't find configuration file {}".format(config_filepath)
+        logger.error(msg)
+        sys.exit(1)
+
+    # Fetch articles from news source(s)
+    # 
     articles = defaultdict(list)
-    published_pkl = os.path.expanduser('~/news_to_epub.pkl')
+    pickle_file = os.path.expanduser('~/news_to_epub.pkl')
 
     try:
-        published_articles = get_published_articles(published_pkl)
+        published_articles = get_published_articles(pickle_file)
     except IOError:
         published_articles = []
 
     from www_guardian_com import get_content
     try:
         for article in get_content(from_date, config.items('www_guardian_com')):
-            if get_article_hash(u'www_guardian_com', article) not in published_articles:
-                articles[u'www_guardian_com'].append(article)
+            if get_article_hash('www_guardian_com', article) not in published_articles:
+                articles['www_guardian_com'].append(article)
             else:
                 msg = u'Skipping already published article "{}".'.format(article['title'])
-                print(msg)
+                logger.debug(msg)
     except Exception, e:
-        print(e)
+        logger.error(e)
         sys.exit(1)
 
     if len(articles['www_guardian_com']) == 0:
-        print('No articles to publish. Exiting.')
+        logger.info(u'No articles to publish. Exiting.')
         sys.exit(0)
 
+    # Generate the .epub file for reader devices
+    # 
     date = datetime.now().strftime(u'%A %d %B %Y')
     title = u'News for {}'.format(date)
     book = make_ebook(title, articles['www_guardian_com'])
@@ -102,9 +131,8 @@ def main():
     filepath = os.path.join(path, filename)
     epub.write_epub(filepath, book, {})
 
-    pickle_published_articles(articles, published_pkl)
-
-def pickle_published_articles(articles, pickle_file):
+    # Update pickle with hashes of articles we just published.
+    #
     new_hashes = []
     for source, source_articles in articles.items():
         for article in source_articles:
@@ -112,15 +140,15 @@ def pickle_published_articles(articles, pickle_file):
             new_hashes.append(article_hash)
 
     try:
-        published_articles = get_published_articles(pickle_file)
+        published_articles = set(get_published_articles(pickle_file))
     except IOError:
-        published_articles = []
+        published_articles = set([])
 
-    merged_hashes = published_articles.append(new_hashes)
+    published_articles.update(new_hashes)
 
     with open(pickle_file, 'wb') as pf:
         pickler = Pickler(pf)
-        pickler.dump(merged_hashes)
+        pickler.dump(published_articles)
 
 def get_article_hash(source, article):
     article_key = u'{}_{}_{}'.format(source, unicode(article['date'].isoformat()), article['title'])
@@ -133,12 +161,6 @@ def get_published_articles(pickle_file):
         published_hashes = upickler.load()
 
     return published_hashes
-
-def read_config(filepath):
-    config = SafeConfigParser()
-    with open(filepath, 'r') as c:
-        config.readfp(c)
-    return config
 
 if __name__ == '__main__':
     main()
