@@ -1,2 +1,2 @@
 # news-to-epub
-Convert news from The Guardian website into Epub format for reading on a BQ Cervantes2
+Convert news from The Guardian website into Epub format.
