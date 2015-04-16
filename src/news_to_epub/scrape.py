@@ -30,12 +30,12 @@ def render_chapter(title, contents, publication_date):
     safe_title = u''.join([c for c in title if c.isalpha() or c.isspace()]).replace(u' ', u'-')
     file_name = u'chapter-{}.xhtml'.format(safe_title)
     chapter = epub.EpubHtml(title=title, file_name=file_name, lang='en')
-    chapter.content = u'<h1>{}</h1><h6>{}</h6>{}'.format(title, publication_date, contents)
+    chapter.content = u'<h1>{}</h1><h6>{}</h6>{}'.format(title, publication_date, contents())
     return chapter
 
 def make_ebook(title, articles):
     assert len(articles) > 0
-    chapters = [render_chapter(c['title'], c['content'], c['date']) for c in articles]
+    chapters = [render_chapter(a['title'], a['content'], a['date']) for a in articles]
 
     book = epub.EpubBook()
     book.set_title(title)

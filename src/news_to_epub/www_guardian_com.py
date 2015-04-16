@@ -1,6 +1,7 @@
 
 
 from datetime import datetime
+from functools import partial
 from itertools import chain
 from json import loads
 import logging
@@ -65,7 +66,7 @@ def get_content(from_date, config):
     chapters = []
     for article in sorted(all_articles, key=lambda k: k['publication_date']):
         date = datetime.strptime(article['publication_date'], "%Y-%m-%dT%H:%M:%SZ")
-        content = scrape(article['url'])
+        content = partial(scrape, article['url'])
         article = dict(title=article['title'], date=date, content=content)
         chapters.append(article)
 
