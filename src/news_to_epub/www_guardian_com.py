@@ -2,72 +2,66 @@
 
 from datetime import datetime
 from functools import partial
-from itertools import chain
 from json import loads
 import logging
-import os 
 
 from bs4 import BeautifulSoup
 import requests
 
 
-logger = logging.getLogger(__file__)
+logger = logging.getLogger()
 
-
-def is_live_article(article):
-    id = article['id'].split('/')
-    if id[1] == 'live':
-        return True
 
 def scrape(uri):
     response = requests.get(uri)
     soup = BeautifulSoup(response.text)
     content = soup.find('div', class_='content__article-body')
     filtered_content = content.find_all('p')
-    processed_content = u''.join([unicode(x) for x in filtered_content])
+    processed_content = u''.join([unicode(i) for i in filtered_content])
     return processed_content
 
-def articles_from_response(res):
-    collated_articles = []
-    num_results = len(res['results'])
-    for n, article in enumerate(res['results'], start=1):
-        if is_live_article(article):
-            continue
-        article = dict(title=article['webTitle'],
-                       publication_date=article['webPublicationDate'],
-                       url=article['webUrl'],)
-        collated_articles.append(article)
-    return collated_articles
+def collate_paginated_results(search_func, total_pages):
+    articles = []
 
-def call_api(api_args):
-    res = requests.get('http://content.guardianapis.com/search', params=api_args)
+    for page in xrange(1, total_pages + 1):
+        try: 
+            response = search_func(page=page)
+        except requests.exceptions.HTTPError, e:
+            error_msg = loads(e.response.text)['response']['message']
+            msg = '{}: {}'.format(error_msg, e.request.url)
+            logger.error(msg)
+            raise
+
+        for article in response['results']:
+            if '/live/' in article['id']:
+                logger.warn('Skipping live updating article "{}".'.format(article['webUrl']))
+                continue
+            title = article['webTitle']
+            date = datetime.strptime(article['webPublicationDate'], "%Y-%m-%dT%H:%M:%SZ")
+            content = partial(scrape, article['webUrl'])
+            articles.append(dict(title=title, date=date, content=content))
+
+    return articles
+
+def search(api_args, **kwargs):
+    merged_args = dict(api_args, **kwargs)
+    res = requests.get('http://content.guardianapis.com/search', params=merged_args)
     res.raise_for_status()
     return loads(res.text)['response']
 
 def get_content(from_date, config):
+    search_args = dict(config)
+    search_args.update({'from-date': from_date.isoformat()})
+    a_search = partial(search, search_args)
+
     try:
-        api_args = dict(config)
-        api_args.update({'from-date': from_date.isoformat()})
-        response = call_api(api_args)
+        response = a_search()
     except requests.exceptions.HTTPError, e:
         error_msg = loads(e.response.text)['response']['message']
         msg = '{}: {}'.format(error_msg, e.request.url)
         logger.error(msg)
         raise
 
-    all_articles = []
-    for page in xrange(1, response['pages'] + 1):
-        response = call_api(dict(api_args, page=page))
-        articles = articles_from_response(response)
-        all_articles.append(articles)
-        
-    all_articles = [i for i in chain(*all_articles)]
+    articles = collate_paginated_results(a_search, response['pages'])
 
-    chapters = []
-    for article in sorted(all_articles, key=lambda k: k['publication_date']):
-        date = datetime.strptime(article['publication_date'], "%Y-%m-%dT%H:%M:%SZ")
-        content = partial(scrape, article['url'])
-        article = dict(title=article['title'], date=date, content=content)
-        chapters.append(article)
-
-    return chapters
+    return articles
