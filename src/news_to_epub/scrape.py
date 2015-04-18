@@ -14,6 +14,7 @@ from cPickle import (
 )
 from datetime import datetime
 import hashlib
+from itertools import chain
 from json import loads
 import logging
 import os
@@ -32,32 +33,27 @@ def safe_filename(name):
 
     return safe_name.lower()
     
-def render_chapter(title, contents, publication_date):
-    safe_title = safe_filename(title)
-    file_name = u'chapter-{}.xhtml'.format(safe_title)
-    chapter = epub.EpubHtml(title=title, file_name=file_name, lang='en')
-    chapter.content = u'<h1>{}</h1><h6>{}</h6>{}'.format(title, publication_date, contents())
-
-    return chapter
-
-def render_section(name, articles):
-    sorted_articles = sorted(articles, key=lambda a: a['date'])
-    chapters = [render_chapter(a['title'], a['content'], a['date']) for a in sorted_articles]
-
-    return name, chapters
-
-def make_ebook(title, sections):
+def make_ebook(title, contents):
     book = epub.EpubBook()
     book.set_title(title)
     book.set_language('en')
-    all_sections = [render_section(k, v) for k, v in sections.items()]
-    book.toc = ([(epub.Section(s), c) for s, c in all_sections])
-    all_chapters = []
-    for s in all_sections:
-        for c in s[1]:
-            all_chapters.append(c)
-            book.add_item(c)
-    book.spine = ['nav'] + all_chapters
+
+    sections = []
+    chapters = []
+    for name, articles in contents.items():
+        section_chapters = []
+        for a in sorted(articles, key=lambda a: a['date']):
+            safe_title = safe_filename(a['title'])
+            file_name = u'chapter-{}.xhtml'.format(safe_title)
+            chapter = epub.EpubHtml(title=a['title'], file_name=file_name, lang='en')
+            chapter.content = u'<h1>{}</h1><h6>{}</h6>{}'.format(title, a['date'], a['content']())
+            section_chapters.append(chapter)
+            book.add_item(chapter)
+        sections.append((name, section_chapters))
+        chapters.append(section_chapters)
+
+    book.toc = ([(epub.Section(n), c) for n, c in sections])
+    book.spine = ['nav'] + [c for c in chain(*chapters)]
     book.add_item(epub.EpubNcx())
 
     return book
