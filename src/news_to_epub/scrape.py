@@ -26,30 +26,38 @@ import requests
 logger = logging.getLogger()
 
 
+def safe_filename(name):
+    safe_name = u''.join([c for c in name if c.isalpha() or c.isspace() or c.isdigit()])
+    safe_name = safe_name.replace(u' ', u'-')
+
+    return safe_name.lower()
+    
 def render_chapter(title, contents, publication_date):
-    safe_title = u''.join([c for c in title if c.isalpha() or c.isspace()]).replace(u' ', u'-')
+    safe_title = safe_filename(title)
     file_name = u'chapter-{}.xhtml'.format(safe_title)
     chapter = epub.EpubHtml(title=title, file_name=file_name, lang='en')
     chapter.content = u'<h1>{}</h1><h6>{}</h6>{}'.format(title, publication_date, contents())
+
     return chapter
 
-def make_ebook(title, articles):
-    assert len(articles) > 0
-    chapters = [render_chapter(a['title'], a['content'], a['date']) for a in articles]
+def render_section(name, articles):
+    sorted_articles = sorted(articles, key=lambda a: a['date'])
+    chapters = [render_chapter(a['title'], a['content'], a['date']) for a in sorted_articles]
 
+    return name, chapters
+
+def make_ebook(title, sections):
     book = epub.EpubBook()
     book.set_title(title)
     book.set_language('en')
-
-    date = datetime.now().strftime('%A %d %B %Y')
-    section_name = u'Headlines for {}'.format(date) 
-    book.toc = ((epub.Link(c.file_name, c.title, c.title) for c in chapters),
-                (epub.Section(section_name), chapters))
-
-    for c in chapters:
-        book.add_item(c)
-
-    book.spine = ['nav'] + chapters
+    all_sections = [render_section(k, v) for k, v in sections.items()]
+    book.toc = ([(epub.Section(s), c) for s, c in all_sections])
+    all_chapters = []
+    for s in all_sections:
+        for c in s[1]:
+            all_chapters.append(c)
+            book.add_item(c)
+    book.spine = ['nav'] + all_chapters
     book.add_item(epub.EpubNcx())
 
     return book
@@ -105,28 +113,23 @@ def main():
         published_articles = []
 
     from www_guardian_com import get_content
-    try:
-        for article in get_content(from_date, config.items('www_guardian_com')):
-            if get_article_hash('www_guardian_com', article) not in published_articles:
-                articles['www_guardian_com'].append(article)
-            else:
-                msg = u'Skipping already published article "{}".'.format(article['title'])
-                logger.debug(msg)
-    except Exception, e:
-        logger.error(e)
-        sys.exit(1)
+    for article in get_content(from_date, config.items('www_guardian_com')):
+        if get_article_hash('www_guardian_com', article) not in published_articles:
+            articles['www_guardian_com'].append(article)
+        else:
+            msg = u'Skipping already published article "{}".'.format(article['title'])
+            logger.warn(msg)
 
-    if len(articles['www_guardian_com']) == 0:
-        logger.info(u'No articles to publish. Exiting.')
+    if sum(map(len, articles.values())) == 0:
+        logger.warn(u'No articles to publish. Exiting.')
         sys.exit(0)
 
     # Generate the .epub file for reader devices
     # 
     date = datetime.now().strftime(u'%A %d %B %Y')
-    title = u'News for {}'.format(date)
-    book = make_ebook(title, articles['www_guardian_com'])
-    safe_filename = u''.join([x for x in title if x.isalpha() or x.isspace() or x.isdigit()]).replace(u' ', u'-')
-    filename = u'{}.epub'.format(safe_filename.lower())
+    title = u'Reading for {}'.format(date)
+    book = make_ebook(title, articles)
+    filename = '{}.epub'.format(safe_filename(title))
     path = os.path.expanduser(args.output_path)
     filepath = os.path.join(path, filename)
     epub.write_epub(filepath, book, {})
