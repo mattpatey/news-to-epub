@@ -46,7 +46,7 @@ def make_ebook(title, contents):
             safe_title = safe_filename(a['title'])
             file_name = u'chapter-{}.xhtml'.format(safe_title)
             chapter = epub.EpubHtml(title=a['title'], file_name=file_name, lang='en')
-            chapter.content = u'<h1>{}</h1><h6>{}</h6>{}'.format(title, a['date'], a['content']())
+            chapter.content = u'<h1>{}</h1><h6>{}</h6>{}'.format(a['title'], a['date'], a['content']())
             section_chapters.append(chapter)
             book.add_item(chapter)
         sections.append((name, section_chapters))
@@ -59,7 +59,7 @@ def make_ebook(title, contents):
     return book
 
 def main():
-    parser = argparse.ArgumentParser("Transform news from The Guardian's website into an epub file.")
+    parser = argparse.ArgumentParser("Transform news from the web into an epub file.")
     parser.add_argument('--from', dest='from_date', type=str, help='Fetch news since a specified date (YYYY-MM-DD)')
     parser.add_argument('--loglevel', type=str, default='warn', help='Log level. Valid values include: debug, error, warn, info. Default: warn.')
     parser.add_argument('--output-path', type=str, default='~', help='Path to where the .epub file will be written, e. g. ~/Desktop')
@@ -108,10 +108,21 @@ def main():
     except IOError:
         published_articles = []
 
+    # TODO: Make use of a lightweight plug-in architecture to
+    # automatically pick-up modules for sourcing content from the web.
+    #
     from www_guardian_com import get_content
     for article in get_content(from_date, config.items('www_guardian_com')):
         if get_article_hash('www_guardian_com', article) not in published_articles:
             articles['www_guardian_com'].append(article)
+        else:
+            msg = u'Skipping already published article "{}".'.format(article['title'])
+            logger.warn(msg)
+
+    from www_theatlantic_com import get_content
+    for article in get_content(from_date, config.items('www_theatlantic_com')):
+        if get_article_hash('www_theatlantic_com', article) not in published_articles:
+            articles['www_theatlantic_com'].append(article)
         else:
             msg = u'Skipping already published article "{}".'.format(article['title'])
             logger.warn(msg)
