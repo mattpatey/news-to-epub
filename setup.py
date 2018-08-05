@@ -5,7 +5,6 @@ setup(
     version = '1.0a',
     install_requires = [
         'EbookLib==0.15',
-        'beautifulsoup4==4.3.2',
         'python-dateutil==2.4.2',
         'requests==2.6.0',
     ],
